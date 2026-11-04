@@ -17,6 +17,7 @@ export default function Admin() {
   const [message, setMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -39,7 +40,7 @@ export default function Admin() {
       if (error) throw error;
 
       if (data.session) {
-        if (data.session.user.email === ADMIN_EMAIL) {
+        if (data.session.user.email?.toLowerCase() === ADMIN_EMAIL) {
           setSession(data.session);
           await loadData();
         } else {
@@ -56,51 +57,70 @@ export default function Admin() {
 
   async function login(e) {
     e.preventDefault();
-    setMessage("Signing in...");
+    setMessage("");
+    setLoading(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    if (error) {
+      if (error) throw error;
+
+      if (data.user.email?.toLowerCase() !== ADMIN_EMAIL) {
+        await supabase.auth.signOut();
+        throw new Error("This admin email is not authorized.");
+      }
+
+      setSession(data.session);
+      setPassword("");
+      setMessage("Login successful!");
+
+      await loadData();
+    } catch (error) {
       setMessage("Login failed: " + error.message);
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    if (data.user.email !== ADMIN_EMAIL) {
-      await supabase.auth.signOut();
-      setMessage("This admin email is not authorized.");
-      return;
-    }
-
-    setSession(data.session);
-    setMessage("Login successful!");
-    await loadData();
   }
 
   async function logout() {
-    await supabase.auth.signOut();
+    setLoading(true);
 
-    setSession(null);
-    setQuestions([]);
-    setResults([]);
-    setSelectedResult(null);
-    setForm(emptyForm);
-    setEditingId(null);
-    setMessage("");
+    try {
+      const { error } = await supabase.auth.signOut();
+
+      if (error) throw error;
+
+      setSession(null);
+      setQuestions([]);
+      setResults([]);
+      setSelectedResult(null);
+      setForm(emptyForm);
+      setEditingId(null);
+      setMessage("");
+      setEmail("");
+      setPassword("");
+    } catch (error) {
+      setMessage("Logout failed: " + error.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function loadData() {
-    const { data, error } = await supabase
-      .from("questions")
-      .select("*")
-      .order("id", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("questions")
+        .select("*")
+        .order("id", { ascending: false });
 
-    if (error) {
-      setMessage("Could not load questions: " + error.message);
-    } else {
+      if (error) throw error;
+
       setQuestions(data || []);
+    } catch (error) {
+      setMessage("Could not load questions: " + error.message);
     }
 
     await refreshResults(false);
@@ -130,39 +150,55 @@ export default function Admin() {
   }
 
   function updateOption(index, value) {
-    const newOptions = [...form.options];
-    newOptions[index] = value;
+    setForm((previous) => {
+      const newOptions = [...previous.options];
+      newOptions[index] = value;
 
-    setForm({
-      ...form,
-      options: newOptions,
+      return {
+        ...previous,
+        options: newOptions,
+      };
     });
   }
 
   async function saveQuestion(e) {
     e.preventDefault();
 
+    if (!form.question.trim()) {
+      setMessage("Please enter the question.");
+      return;
+    }
+
+    if (form.options.length !== 4 || form.options.some((option) => !option.trim())) {
+      setMessage("Please fill in all four options.");
+      return;
+    }
+
+    const correctAnswer = Number(form.answer);
+
     if (
-      !form.question.trim() ||
-      form.options.some((option) => !option.trim())
+      !Number.isInteger(correctAnswer) ||
+      correctAnswer < 0 ||
+      correctAnswer > 3
     ) {
-      setMessage("Please fill in the question and all four options.");
+      setMessage("Please select a valid correct answer.");
       return;
     }
 
     setSaving(true);
-
-    const questionData = {
-      question: form.question.trim(),
-      options: form.options,
-      answer: Number(form.answer),
-      explanation: form.explanation.trim(),
-    };
+    setMessage("");
 
     try {
+      const questionData = {
+        question: form.question.trim(),
+        options: form.options.map((option) => option.trim()),
+        answer: correctAnswer,
+        explanation: form.explanation.trim(),
+      };
+
       let response;
 
-      if (editingId) {
+      if (editingId !== null) {
         response = await supabase
           .from("questions")
           .update(questionData)
@@ -176,7 +212,7 @@ export default function Admin() {
       if (response.error) throw response.error;
 
       setMessage(
-        editingId
+        editingId !== null
           ? "Question updated successfully!"
           : "Question added successfully!"
       );
@@ -193,7 +229,7 @@ export default function Admin() {
   }
 
   function getOptions(question) {
-    let options = question.options;
+    let options = question?.options;
 
     if (typeof options === "string") {
       try {
@@ -209,16 +245,20 @@ export default function Admin() {
   function editQuestion(question) {
     const options = getOptions(question);
 
+    if (options.length !== 4) {
+      setMessage("This question does not have four valid options.");
+      return;
+    }
+
     setForm({
       question: question.question || "",
-      options: options.length === 4
-        ? options
-        : ["", "", "", ""],
+      options,
       answer: String(question.answer ?? 0),
       explanation: question.explanation || "",
     });
 
     setEditingId(question.id);
+    setMessage("");
 
     window.scrollTo({
       top: 0,
@@ -231,24 +271,30 @@ export default function Admin() {
       return;
     }
 
-    const { error } = await supabase
-      .from("questions")
-      .delete()
-      .eq("id", id);
+    setDeleting(true);
+    setMessage("");
 
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from("questions")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setMessage("Question deleted successfully.");
+
+      if (editingId === id) {
+        setForm(emptyForm);
+        setEditingId(null);
+      }
+
+      await loadData();
+    } catch (error) {
       setMessage("Could not delete question: " + error.message);
-      return;
+    } finally {
+      setDeleting(false);
     }
-
-    setMessage("Question deleted successfully.");
-
-    if (editingId === id) {
-      setForm(emptyForm);
-      setEditingId(null);
-    }
-
-    await loadData();
   }
 
   function cancelEdit() {
@@ -259,7 +305,7 @@ export default function Admin() {
 
   function getAnswers(result) {
     try {
-      if (!result.answers) return {};
+      if (!result?.answers) return {};
 
       return typeof result.answers === "string"
         ? JSON.parse(result.answers)
@@ -273,7 +319,13 @@ export default function Admin() {
     const totalQuestions = Number(total);
     const studentScore = Number(score);
 
-    if (!totalQuestions || totalQuestions <= 0) return 0;
+    if (
+      !Number.isFinite(totalQuestions) ||
+      !Number.isFinite(studentScore) ||
+      totalQuestions <= 0
+    ) {
+      return 0;
+    }
 
     return Math.round(
       (studentScore / totalQuestions) * 100
@@ -285,20 +337,26 @@ export default function Admin() {
       return;
     }
 
-    const { error } = await supabase
-      .from("quiz_results")
-      .delete()
-      .eq("id", id);
+    setDeleting(true);
+    setMessage("");
 
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from("quiz_results")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setSelectedResult(null);
+      setMessage("Student result deleted successfully!");
+
+      await refreshResults(false);
+    } catch (error) {
       setMessage("Could not delete result: " + error.message);
-      return;
+    } finally {
+      setDeleting(false);
     }
-
-    setSelectedResult(null);
-    setMessage("Student result deleted successfully!");
-
-    await refreshResults(false);
   }
 
   function viewResult(result) {
@@ -347,12 +405,20 @@ export default function Admin() {
                 required
               />
 
-              <button className="submit-button" type="submit">
+              <button
+                className="submit-button"
+                type="submit"
+                disabled={loading}
+              >
                 Login
               </button>
             </form>
 
-            {message && <p>{message}</p>}
+            {message && (
+              <p style={{ color: "#f87171", marginTop: "15px" }}>
+                {message}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -368,17 +434,27 @@ export default function Admin() {
           <h1>Admin Dashboard</h1>
           <p>Manage questions and student results.</p>
 
-          <button className="submit-button" onClick={logout}>
+          <p>
+            Logged in as: <strong>{session.user.email}</strong>
+          </p>
+
+          <button
+            className="submit-button"
+            onClick={logout}
+            disabled={loading}
+          >
             Logout
           </button>
 
-          {message && <p>{message}</p>}
+          {message && (
+            <p style={{ marginTop: "15px" }}>{message}</p>
+          )}
         </div>
 
         {/* ADD AND EDIT QUESTIONS */}
         <div className="question-card">
           <h2>
-            {editingId ? "Edit Question" : "Add New Question"}
+            {editingId !== null ? "Edit Question" : "Add New Question"}
           </h2>
 
           <form onSubmit={saveQuestion}>
@@ -387,10 +463,10 @@ export default function Admin() {
             <textarea
               value={form.question}
               onChange={(e) =>
-                setForm({
-                  ...form,
+                setForm((previous) => ({
+                  ...previous,
                   question: e.target.value,
-                })
+                }))
               }
               required
             />
@@ -416,10 +492,10 @@ export default function Admin() {
             <select
               value={form.answer}
               onChange={(e) =>
-                setForm({
-                  ...form,
+                setForm((previous) => ({
+                  ...previous,
                   answer: e.target.value,
-                })
+                }))
               }
             >
               <option value="0">Option A</option>
@@ -433,10 +509,10 @@ export default function Admin() {
             <textarea
               value={form.explanation}
               onChange={(e) =>
-                setForm({
-                  ...form,
+                setForm((previous) => ({
+                  ...previous,
                   explanation: e.target.value,
-                })
+                }))
               }
             />
 
@@ -447,13 +523,17 @@ export default function Admin() {
             >
               {saving
                 ? "Saving..."
-                : editingId
+                : editingId !== null
                   ? "Save Changes"
                   : "Add Question"}
             </button>
 
-            {editingId && (
-              <button type="button" onClick={cancelEdit}>
+            {editingId !== null && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={saving}
+              >
                 Cancel
               </button>
             )}
@@ -471,112 +551,123 @@ export default function Admin() {
               <div key={question.id} className="review-item">
                 <p>{question.question}</p>
 
-                <button onClick={() => editQuestion(question)}>
+                <button
+                  onClick={() => editQuestion(question)}
+                  disabled={deleting}
+                >
                   Edit
                 </button>
 
-                <button onClick={() => deleteQuestion(question.id)}>
-                  Delete
+                <button
+                  onClick={() => deleteQuestion(question.id)}
+                  disabled={deleting}
+                >
+                  {deleting ? "Please wait..." : "Delete"}
                 </button>
               </div>
             ))
           )}
         </div>
 
-    
-{/* STUDENT RESULTS */}
-<div className="question-card">
-  <h2>Student Results ({results.length})</h2>
+        {/* STUDENT RESULTS */}
+        <div className="question-card">
+          <h2>Student Results ({results.length})</h2>
 
-  <button
-    className="submit-button"
-    onClick={() => refreshResults(true)}
-    disabled={refreshing}
-  >
-    {refreshing ? "Loading..." : "Refresh Results"}
-  </button>
-
-  {results.length === 0 ? (
-    <p>No student results found.</p>
-  ) : (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-        gap: "15px",
-        marginTop: "20px",
-      }}
-    >
-      {results.map((result) => {
-        const score = Number(result.score) || 0;
-        const total = Number(result.total_questions) || 0;
-        const percentage =
-          total > 0 ? Math.round((score / total) * 100) : 0;
-
-        return (
-          <div
-            key={result.id}
-            className="review-item"
-            style={{
-              padding: "20px",
-              borderRadius: "12px",
-              border: "1px solid #38bdf8",
-            }}
+          <button
+            className="submit-button"
+            onClick={() => refreshResults(true)}
+            disabled={refreshing}
           >
-            <h3>{result.student_name || "Unknown Student"}</h3>
+            {refreshing ? "Loading..." : "Refresh Results"}
+          </button>
 
-            <p>
-              <strong>Score:</strong> {score} / {total}
-            </p>
+          {results.length === 0 ? (
+            <p>No student results found.</p>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                gap: "15px",
+                marginTop: "20px",
+              }}
+            >
+              {results.map((result) => {
+                const score = Number(result.score) || 0;
+                const total = Number(result.total_questions) || 0;
+                const percentage = getPercentage(score, total);
 
-            <div style={{ margin: "15px 0" }}>
-              <h2 style={{ color: "#38bdf8", fontSize: "32px" }}>
-                {percentage}%
-              </h2>
+                return (
+                  <div
+                    key={result.id}
+                    className="review-item"
+                    style={{
+                      padding: "20px",
+                      borderRadius: "12px",
+                      border: "1px solid #38bdf8",
+                    }}
+                  >
+                    <h3>{result.student_name || "Unknown Student"}</h3>
 
-              <p>Student Percentage</p>
+                    <p>
+                      <strong>Score:</strong> {score} / {total}
+                    </p>
 
-              <div
-                style={{
-                  width: "100%",
-                  height: "12px",
-                  background: "#334155",
-                  borderRadius: "10px",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${percentage}%`,
-                    height: "100%",
-                    background: "#38bdf8",
-                    borderRadius: "10px",
-                  }}
-                />
-              </div>
+                    <div style={{ margin: "15px 0" }}>
+                      <h2
+                        style={{
+                          color: "#38bdf8",
+                          fontSize: "32px",
+                        }}
+                      >
+                        {percentage}%
+                      </h2>
+
+                      <p>Student Percentage</p>
+
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "12px",
+                          background: "#334155",
+                          borderRadius: "10px",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${percentage}%`,
+                            height: "100%",
+                            background: "#38bdf8",
+                            borderRadius: "10px",
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <p>
+                      <strong>Date:</strong>{" "}
+                      {result.created_at
+                        ? new Date(result.created_at).toLocaleString()
+                        : "Unknown"}
+                    </p>
+
+                    <button onClick={() => viewResult(result)}>
+                      View Details
+                    </button>
+
+                    <button
+                      onClick={() => deleteResult(result.id)}
+                      disabled={deleting}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-
-            <p>
-              <strong>Date:</strong>{" "}
-              {result.created_at
-                ? new Date(result.created_at).toLocaleString()
-                : "Unknown"}
-            </p>
-
-            <button onClick={() => viewResult(result)}>
-              View Details
-            </button>
-
-            <button onClick={() => deleteResult(result.id)}>
-              Delete
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  )}
-</div>
-
+          )}
+        </div>
 
         {/* STUDENT RESULT DETAILS */}
         {selectedResult && (

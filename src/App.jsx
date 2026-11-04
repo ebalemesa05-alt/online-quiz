@@ -1,5 +1,4 @@
-
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 import "./App.css";
 import Admin from "./Admin";
@@ -17,40 +16,34 @@ function App() {
   const [score, setScore] = useState(0);
   const [showAdmin, setShowAdmin] = useState(false);
 
+  // Prevent duplicate result submissions
+  const savingRef = useRef(false);
+  const savedRef = useRef(false);
+
   useEffect(() => {
     loadQuestions();
   }, []);
 
   async function loadQuestions() {
     setLoading(true);
+    setMessage("");
 
-    const { data, error } = await supabase
-      .from("questions")
-      .select("*")
-      .order("id", { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from("questions")
+        .select("*")
+        .order("id", { ascending: true });
 
-    if (error) {
-      setMessage("Unable to load questions: " + error.message);
-      setQuestions([]);
-    } else {
+      if (error) throw error;
+
       setQuestions(data || []);
-      setMessage("");
+    } catch (error) {
+      setQuestions([]);
+      setMessage("Unable to load questions: " + error.message);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
-
-  const currentQuestion = questions[currentIndex];
-
-  const selectedAnswer = currentQuestion
-    ? answers[currentQuestion.id]
-    : undefined;
-
-  const answered = selectedAnswer !== undefined;
-
-  const progress = questions.length
-    ? ((currentIndex + 1) / questions.length) * 100
-    : 0;
 
   function getOptions(question) {
     if (Array.isArray(question?.options)) {
@@ -69,6 +62,22 @@ function App() {
     return [];
   }
 
+  const currentQuestion = questions[currentIndex];
+
+  const selectedAnswer = currentQuestion
+    ? answers[currentQuestion.id]
+    : undefined;
+
+  const answered = selectedAnswer !== undefined;
+
+  const progress = questions.length
+    ? ((currentIndex + 1) / questions.length) * 100
+    : 0;
+
+  const percentage = questions.length
+    ? Math.round((score / questions.length) * 100)
+    : 0;
+
   function startQuiz() {
     if (!studentName.trim()) {
       setMessage("Please enter your name.");
@@ -76,9 +85,33 @@ function App() {
     }
 
     if (questions.length === 0) {
-      setMessage("No questions available yet. Please try again later.");
+      setMessage("No questions available. Please try again later.");
       return;
     }
+
+    const invalidQuestion = questions.some((question) => {
+      const options = getOptions(question);
+
+      return (
+        !question.question ||
+        options.length < 2 ||
+        question.answer === null ||
+        question.answer === undefined ||
+        !Number.isInteger(Number(question.answer)) ||
+        Number(question.answer) < 0 ||
+        Number(question.answer) >= options.length
+      );
+    });
+
+    if (invalidQuestion) {
+      setMessage(
+        "Some questions have invalid options or answers. Please contact the administrator."
+      );
+      return;
+    }
+
+    savingRef.current = false;
+    savedRef.current = false;
 
     setCurrentIndex(0);
     setAnswers({});
@@ -89,7 +122,7 @@ function App() {
   }
 
   function selectAnswer(index) {
-    if (answered || !currentQuestion) return;
+    if (answered || !currentQuestion || saving) return;
 
     setAnswers((previous) => ({
       ...previous,
@@ -98,41 +131,48 @@ function App() {
   }
 
   async function finishQuiz() {
-    if (saving) return;
+    if (savingRef.current || savedRef.current) return;
 
+    savingRef.current = true;
     setSaving(true);
     setMessage("");
 
-    let totalScore = 0;
+    try {
+      let totalScore = 0;
 
-    questions.forEach((question) => {
-      if (
-        Number(answers[question.id]) === Number(question.answer)
-      ) {
-        totalScore++;
-      }
-    });
+      questions.forEach((question) => {
+        if (
+          answers[question.id] !== undefined &&
+          Number(answers[question.id]) === Number(question.answer)
+        ) {
+          totalScore++;
+        }
+      });
 
-    const { error } = await supabase
-      .from("quiz_results")
-      .insert([
-        {
-          student_name: studentName.trim(),
-          score: totalScore,
-          total_questions: questions.length,
-          answers: answers,
-        },
-      ]);
+      const result = {
+        student_name: studentName.trim(),
+        score: totalScore,
+        total_questions: questions.length,
+        answers: answers,
+      };
 
-    if (error) {
+      const { error } = await supabase
+        .from("quiz_results")
+        .insert([result]);
+
+      if (error) throw error;
+
+      savedRef.current = true;
+
+      setScore(totalScore);
+      setFinished(true);
+      setMessage("");
+    } catch (error) {
       setMessage("Could not save result: " + error.message);
+    } finally {
+      savingRef.current = false;
       setSaving(false);
-      return;
     }
-
-    setScore(totalScore);
-    setFinished(true);
-    setSaving(false);
   }
 
   function nextQuestion() {
@@ -146,6 +186,9 @@ function App() {
   }
 
   function restartQuiz() {
+    savingRef.current = false;
+    savedRef.current = false;
+
     setCurrentIndex(0);
     setAnswers({});
     setFinished(false);
@@ -238,6 +281,10 @@ function App() {
               placeholder="Enter your full name"
               value={studentName}
               onChange={(e) => setStudentName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") startQuiz();
+              }}
+              maxLength={100}
               style={{
                 width: "100%",
                 maxWidth: "350px",
@@ -265,6 +312,20 @@ function App() {
               <p style={{ color: "#f87171", marginTop: "15px" }}>
                 {message}
               </p>
+            )}
+
+            {questions.length === 0 && (
+              <button
+                onClick={loadQuestions}
+                style={{
+                  display: "block",
+                  margin: "15px auto",
+                  padding: "10px 18px",
+                  cursor: "pointer",
+                }}
+              >
+                Refresh Questions
+              </button>
             )}
 
             <div className="hero-stats">
@@ -380,7 +441,7 @@ function App() {
                       key={index}
                       className={optionClass}
                       onClick={() => selectAnswer(index)}
-                      disabled={answered}
+                      disabled={answered || saving}
                     >
                       <span className="option-letter">
                         {String.fromCharCode(65 + index)}
@@ -399,12 +460,6 @@ function App() {
                   );
                 })}
               </div>
-
-              {getOptions(currentQuestion).length === 0 && (
-                <p style={{ color: "#f87171", marginTop: "15px" }}>
-                  No valid options found for this question.
-                </p>
-              )}
 
               {answered && (
                 <div className="explanation">
@@ -476,6 +531,9 @@ function App() {
               <span>OUT OF {questions.length}</span>
             </div>
 
+            <h2>{percentage}%</h2>
+            <p>Your final percentage</p>
+
             <h3>
               {score === questions.length
                 ? "Perfect Score! Excellent Work!"
@@ -521,7 +579,7 @@ function App() {
                     <p>
                       Correct answer:{" "}
                       <span className="correct-answer">
-                        {options[question.answer] ?? "Not available"}
+                        {options[Number(question.answer)] ?? "Not available"}
                       </span>
                     </p>
 
