@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 import "./App.css";
-import Admin from "./Admin";
+import Admin from "./admin.jsx";
 
 function App() {
   const [questions, setQuestions] = useState([]);
@@ -231,8 +231,8 @@ function App() {
     <div className="app">
       <nav className="navbar">
         <a href="#" className="logo">
-          <span className="logo-icon">Q</span>
-          QuizMaster
+          <span className="logo-icon">E</span>
+          EbaQuize Learning
         </a>
 
         <button
@@ -260,7 +260,7 @@ function App() {
         <section className="hero">
           <div className="hero-content">
             <span className="eyebrow">
-              WELCOME TO QUIZMASTER
+              WELCOME TO  EBAQUIZE LEARNING
             </span>
 
             <h1>
@@ -350,11 +350,11 @@ function App() {
             <div className="visual-card">
               <div className="visual-top">
                 <span className="visual-icon">✦</span>
-                <span className="live-label">QUIZ EXPERIENCE</span>
+                <span className="live-label">EBA QUIZE</span>
               </div>
 
               <div className="visual-circle">
-                <span>Q</span>
+                <span>E</span>
               </div>
 
               <h2>Ready to Learn?</h2>
@@ -597,7 +597,7 @@ function App() {
       )}
 
       <footer className="footer">
-        <span>© 2026 QuizMaster. All rights reserved.</span>
+        <span>© 2026 Ebisa Lemesa. All rights reserved.</span>
         <span>Learn More. Achieve More.</span>
       </footer>
     </div>
