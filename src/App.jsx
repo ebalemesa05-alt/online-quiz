@@ -1,145 +1,286 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "./supabase";
 import "./App.css";
-
-const questions = [
-  {
-    question: "What does HTML stand for?",
-    options: [
-      "Hyper Text Markup Language",
-      "High Text Machine Language",
-      "Hyper Transfer Markup Language",
-      "Home Tool Markup Language"
-    ],
-    answer: 0,
-    explanation: "HTML stands for Hyper Text Markup Language. It structures web pages."
-  },
-  {
-    question: "Which language is used to style web pages?",
-    options: ["HTML", "CSS", "Python", "Java"],
-    answer: 1,
-    explanation: "CSS controls the colors, layout, fonts and visual appearance of web pages."
-  },
-  {
-    question: "Which symbol selects an ID in CSS?",
-    options: [".", "#", "*", "&"],
-    answer: 1,
-    explanation: "The # symbol is used to select an HTML element by its ID in CSS."
-  },
-  {
-    question: "Which keyword declares a variable in JavaScript?",
-    options: ["style", "design", "let", "color"],
-    answer: 2,
-    explanation: "The let keyword declares a block-scoped variable in JavaScript."
-  },
-  {
-    question: "Which HTML tag creates a hyperlink?",
-    options: ["<link>", "<a>", "<p>", "<img>"],
-    answer: 1,
-    explanation: "The anchor tag <a> creates hyperlinks to other pages or resources."
-  }
-];
+import Admin from "./Admin";
 
 function App() {
+  const [questions, setQuestions] = useState([]);
+  const [studentName, setStudentName] = useState("");
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState({});
   const [started, setStarted] = useState(false);
-  const [current, setCurrent] = useState(0);
-  const [selected, setSelected] = useState(null);
-  const [submitted, setSubmitted] = useState(false);
-  const [userAnswers, setUserAnswers] = useState([]);
-  const [finalScore, setFinalScore] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [score, setScore] = useState(0);
+  const [showAdmin, setShowAdmin] = useState(false);
 
-  const question = questions[current];
-  const progress = ((current + 1) / questions.length) * 100;
+  useEffect(() => {
+    loadQuestions();
+  }, []);
+
+  async function loadQuestions() {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("questions")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      setMessage("Unable to load questions: " + error.message);
+      setQuestions([]);
+    } else {
+      setQuestions(data || []);
+      setMessage("");
+    }
+
+    setLoading(false);
+  }
+
+  const currentQuestion = questions[currentIndex];
+
+  const selectedAnswer = currentQuestion
+    ? answers[currentQuestion.id]
+    : undefined;
+
+  const answered = selectedAnswer !== undefined;
+
+  const progress = questions.length
+    ? ((currentIndex + 1) / questions.length) * 100
+    : 0;
+
+  function getOptions(question) {
+    if (Array.isArray(question?.options)) {
+      return question.options;
+    }
+
+    if (typeof question?.options === "string") {
+      try {
+        const parsed = JSON.parse(question.options);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    return [];
+  }
 
   function startQuiz() {
-    setStarted(true);
-    setCurrent(0);
-    setSelected(null);
-    setSubmitted(false);
-    setUserAnswers([]);
-    setFinalScore(0);
+    if (!studentName.trim()) {
+      setMessage("Please enter your name.");
+      return;
+    }
+
+    if (questions.length === 0) {
+      setMessage("No questions available yet. Please try again later.");
+      return;
+    }
+
+    setCurrentIndex(0);
+    setAnswers({});
     setFinished(false);
+    setScore(0);
+    setMessage("");
+    setStarted(true);
+  }
+
+  function selectAnswer(index) {
+    if (answered || !currentQuestion) return;
+
+    setAnswers((previous) => ({
+      ...previous,
+      [currentQuestion.id]: index,
+    }));
+  }
+
+  async function finishQuiz() {
+    if (saving) return;
+
+    setSaving(true);
+    setMessage("");
+
+    let totalScore = 0;
+
+    questions.forEach((question) => {
+      if (
+        Number(answers[question.id]) === Number(question.answer)
+      ) {
+        totalScore++;
+      }
+    });
+
+    const { error } = await supabase
+      .from("quiz_results")
+      .insert([
+        {
+          student_name: studentName.trim(),
+          score: totalScore,
+          total_questions: questions.length,
+          answers: answers,
+        },
+      ]);
+
+    if (error) {
+      setMessage("Could not save result: " + error.message);
+      setSaving(false);
+      return;
+    }
+
+    setScore(totalScore);
+    setFinished(true);
+    setSaving(false);
   }
 
   function nextQuestion() {
-    const updatedAnswers = [...userAnswers, selected];
-    setUserAnswers(updatedAnswers);
+    if (!answered || saving) return;
 
-    const newScore = updatedAnswers.reduce(
-      (total, answer, index) =>
-        total + (answer === questions[index].answer ? 1 : 0),
-      0
-    );
-
-    if (current === questions.length - 1) {
-      setFinalScore(newScore);
-      setFinished(true);
+    if (currentIndex < questions.length - 1) {
+      setCurrentIndex((previous) => previous + 1);
     } else {
-      setCurrent(current + 1);
-      setSelected(null);
-      setSubmitted(false);
+      finishQuiz();
     }
   }
 
   function restartQuiz() {
-    setStarted(false);
-    setCurrent(0);
-    setSelected(null);
-    setSubmitted(false);
-    setUserAnswers([]);
-    setFinalScore(0);
+    setCurrentIndex(0);
+    setAnswers({});
     setFinished(false);
+    setStarted(false);
+    setStudentName("");
+    setScore(0);
+    setMessage("");
+  }
+
+  if (showAdmin) {
+    return (
+      <div>
+        <button
+          onClick={() => setShowAdmin(false)}
+          style={{
+            padding: "12px 20px",
+            margin: "15px",
+            cursor: "pointer",
+          }}
+        >
+          ← Back to Quiz
+        </button>
+
+        <Admin />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="app">
+        <h2 style={{ textAlign: "center", padding: "100px" }}>
+          Loading QuizMaster...
+        </h2>
+      </div>
+    );
   }
 
   return (
     <div className="app">
-      <header className="navbar">
-        <a className="logo" href="#">
+      <nav className="navbar">
+        <a href="#" className="logo">
           <span className="logo-icon">Q</span>
           QuizMaster
         </a>
 
-        <div className="nav-right">
-          <span className="nav-status">
-            <span className="status-dot"></span>
-            Learning Platform
-          </span>
-        </div>
-      </header>
+        <button
+          onClick={() => setShowAdmin(true)}
+          style={{
+            padding: "10px 18px",
+            borderRadius: "8px",
+            background: "#7c3aed",
+            color: "white",
+            border: "none",
+            cursor: "pointer",
+            marginRight: "15px",
+          }}
+        >
+          Admin
+        </button>
 
-      {!started ? (
-        <main className="hero">
+        <div className="nav-status">
+          <span className="status-dot"></span>
+          Online Learning Platform
+        </div>
+      </nav>
+
+      {!started && !finished && (
+        <section className="hero">
           <div className="hero-content">
-            <span className="eyebrow">WELCOME TO QUIZMASTER</span>
+            <span className="eyebrow">
+              WELCOME TO QUIZMASTER
+            </span>
 
             <h1>
-              Learn More.
+              Challenge Your
+              <span> Knowledge.</span>
               <br />
-              <span>Challenge Yourself.</span>
+              Discover Your Potential.
             </h1>
 
             <p>
-              Test your knowledge, improve your skills, and
-              discover how much you know with our interactive quizzes.
+              Test your knowledge, improve your skills,
+              and track your progress with QuizMaster.
+              Learning has never been this exciting.
             </p>
 
-            <button className="primary-button" onClick={startQuiz}>
-              Start Quiz <span>→</span>
+            <input
+              type="text"
+              placeholder="Enter your full name"
+              value={studentName}
+              onChange={(e) => setStudentName(e.target.value)}
+              style={{
+                width: "100%",
+                maxWidth: "350px",
+                padding: "15px",
+                borderRadius: "10px",
+                border: "1px solid #475569",
+                background: "#1e293b",
+                color: "white",
+                marginBottom: "15px",
+                fontSize: "15px",
+              }}
+            />
+
+            <br />
+
+            <button
+              className="primary-button"
+              onClick={startQuiz}
+            >
+              Start Your Quiz
+              <span>→</span>
             </button>
+
+            {message && (
+              <p style={{ color: "#f87171", marginTop: "15px" }}>
+                {message}
+              </p>
+            )}
 
             <div className="hero-stats">
               <div>
-                <strong>05</strong>
+                <strong>{questions.length}</strong>
                 <span>Questions</span>
               </div>
-              <div>
-                <strong>01</strong>
-                <span>Quiz</span>
-              </div>
+
               <div>
                 <strong>100%</strong>
                 <span>Learning</span>
+              </div>
+
+              <div>
+                <strong>∞</strong>
+                <span>Possibilities</span>
               </div>
             </div>
           </div>
@@ -148,19 +289,24 @@ function App() {
             <div className="visual-card">
               <div className="visual-top">
                 <span className="visual-icon">✦</span>
-                <span className="live-label">INTERACTIVE QUIZ</span>
+                <span className="live-label">QUIZ EXPERIENCE</span>
               </div>
 
               <div className="visual-circle">
                 <span>Q</span>
               </div>
 
-              <h2>Your Knowledge</h2>
-              <p>Every question brings you one step forward.</p>
+              <h2>Ready to Learn?</h2>
+
+              <p>
+                Every question is an opportunity
+                to discover something new.
+              </p>
 
               <div className="visual-line">
                 <span></span>
               </div>
+
               <div className="visual-bottom">
                 <span>LEARN</span>
                 <span>GROW</span>
@@ -168,82 +314,29 @@ function App() {
               </div>
             </div>
           </div>
-        </main>
-      ) : finished ? (
-        <main className="quiz-section">
-          <div className="result-card">
-            <div className="result-icon">🏆</div>
-            <span className="eyebrow">QUIZ COMPLETED</span>
-            <h1>Excellent Work!</h1>
-            <p>You have completed all the questions.</p>
+        </section>
+      )}
 
-            <div className="score-circle">
-              <strong>{finalScore}/{questions.length}</strong>
-              <span>Your Score</span>
-            </div>
-
-            <h3>
-              {finalScore === questions.length
-                ? "Perfect Score! Amazing!"
-                : finalScore >= 3
-                ? "Great job! Keep learning!"
-                : "Good effort! Practice makes progress!"}
-            </h3>
-
-            <div className="answer-review">
-              <h2>Answer Review</h2>
-
-              {questions.map((q, index) => {
-                const isCorrect = userAnswers[index] === q.answer;
-
-                return (
-                  <div className="review-item" key={index}>
-                    <p className="review-question">
-                      Question {index + 1}: {q.question}
-                    </p>
-
-                    <p>
-                      Your Answer:{" "}
-                      <strong className={isCorrect ? "correct-answer" : "wrong-answer"}>
-                        {q.options[userAnswers[index]] ?? "Not answered"}
-                      </strong>
-                    </p>
-
-                    <p>
-                      Correct Answer:{" "}
-                      <strong className="correct-answer">
-                        {q.options[q.answer]}
-                      </strong>
-                    </p>
-
-                    <p className="review-explanation">
-                      Explanation: {q.explanation}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-
-            <button className="primary-button" onClick={restartQuiz}>
-              Try Again <span>↻</span>
-            </button>
-          </div>
-        </main>
-      ) : (
-        <main className="quiz-section">
+      {started && !finished && currentQuestion && (
+        <section className="quiz-section">
           <div className="quiz-container">
             <div className="quiz-heading">
               <div>
-                <span className="eyebrow">KNOWLEDGE CHALLENGE</span>
-                <h1>Test Your Skills</h1>
+                <span className="eyebrow">QUIZ IN PROGRESS</span>
+                <h1>Let's Test Your Knowledge</h1>
+
+                <p style={{ color: "#94a3b8", marginTop: "10px" }}>
+                  Student: {studentName}
+                </p>
               </div>
+
               <span className="question-count">
-                {current + 1} / {questions.length}
+                {currentIndex + 1} / {questions.length}
               </span>
             </div>
 
             <div className="progress-info">
-              <span>Quiz Progress</span>
+              <span>Your Progress</span>
               <span>{Math.round(progress)}%</span>
             </div>
 
@@ -256,20 +349,29 @@ function App() {
 
             <div className="question-card">
               <span className="question-label">
-                QUESTION {String(current + 1).padStart(2, "0")}
+                QUESTION {currentIndex + 1}
               </span>
 
-              <h2>{question.question}</h2>
+              <h2>{currentQuestion.question}</h2>
 
               <p className="choose-text">
-                Select the correct answer below.
+                Choose the correct answer below.
               </p>
 
               <div className="options-list">
-                {question.options.map((option, index) => {
+                {getOptions(currentQuestion).map((option, index) => {
+                  const isCorrect =
+                    Number(index) === Number(currentQuestion.answer);
+
+                  const isSelected = selectedAnswer === index;
+
                   let optionClass = "option-button";
 
-                  if (selected === index) {
+                  if (answered && isCorrect) {
+                    optionClass += " correct";
+                  } else if (answered && isSelected && !isCorrect) {
+                    optionClass += " incorrect";
+                  } else if (isSelected) {
                     optionClass += " selected";
                   }
 
@@ -277,53 +379,168 @@ function App() {
                     <button
                       key={index}
                       className={optionClass}
-                      onClick={() => !submitted && setSelected(index)}
-                      disabled={submitted}
+                      onClick={() => selectAnswer(index)}
+                      disabled={answered}
                     >
                       <span className="option-letter">
                         {String.fromCharCode(65 + index)}
                       </span>
+
                       <span>{option}</span>
-                      <span className="option-check">
-                        {selected === index ? "●" : ""}
-                      </span>
+
+                      {answered && isCorrect && (
+                        <span className="option-check">✓</span>
+                      )}
+
+                      {answered && isSelected && !isCorrect && (
+                        <span className="option-check">✕</span>
+                      )}
                     </button>
                   );
                 })}
               </div>
 
+              {getOptions(currentQuestion).length === 0 && (
+                <p style={{ color: "#f87171", marginTop: "15px" }}>
+                  No valid options found for this question.
+                </p>
+              )}
+
+              {answered && (
+                <div className="explanation">
+                  <strong>
+                    {Number(selectedAnswer) === Number(currentQuestion.answer)
+                      ? "Correct Answer!"
+                      : "Incorrect Answer"}
+                  </strong>
+
+                  <p>
+                    {currentQuestion.explanation ||
+                      "Keep learning and improving your knowledge!"}
+                  </p>
+                </div>
+              )}
+
+              {message && (
+                <p style={{ color: "#f87171", marginTop: "15px" }}>
+                  {message}
+                </p>
+              )}
+
               <div className="quiz-actions">
-                {!submitted ? (
-                  <button
-                    className="primary-button submit-button"
-                    onClick={() => setSubmitted(true)}
-                    disabled={selected === null}
-                  >
-                    Submit Answer →
-                  </button>
-                ) : (
-                  <button
-                    className="primary-button submit-button"
-                    onClick={nextQuestion}
-                  >
-                    {current === questions.length - 1
-                      ? "View Results →"
-                      : "Next Question →"}
-                  </button>
-                )}
+                <button
+                  className="primary-button submit-button"
+                  onClick={nextQuestion}
+                  disabled={!answered || saving}
+                >
+                  {saving
+                    ? "Saving Result..."
+                    : currentIndex === questions.length - 1
+                    ? "Finish Quiz"
+                    : "Next Question →"}
+                </button>
               </div>
             </div>
 
-            <p className="quiz-footer">
-              Take your time. Think carefully and choose your best answer.
-            </p>
+            <div className="quiz-footer">
+              Take your time. Choose your best answer.
+            </div>
           </div>
-        </main>
+        </section>
+      )}
+
+      {started && !finished && !currentQuestion && (
+        <section className="quiz-section">
+          <div className="result-card">
+            <h2>Question not found.</h2>
+            <button className="primary-button" onClick={restartQuiz}>
+              Back to Home
+            </button>
+          </div>
+        </section>
+      )}
+
+      {finished && (
+        <section className="quiz-section">
+          <div className="result-card">
+            <div className="result-icon">🏆</div>
+
+            <span className="eyebrow">QUIZ COMPLETED</span>
+
+            <h1>Congratulations, {studentName}!</h1>
+
+            <p>You have successfully completed your quiz.</p>
+
+            <div className="score-circle">
+              <strong>{score}</strong>
+              <span>OUT OF {questions.length}</span>
+            </div>
+
+            <h3>
+              {score === questions.length
+                ? "Perfect Score! Excellent Work!"
+                : score >= questions.length / 2
+                ? "Great Job! Keep Improving!"
+                : "Good Effort! Keep Practicing!"}
+            </h3>
+
+            <button
+              className="primary-button"
+              onClick={restartQuiz}
+            >
+              Take Another Quiz →
+            </button>
+
+            <div className="answer-review">
+              <h2>Answer Review</h2>
+
+              {questions.map((question, index) => {
+                const correct =
+                  Number(answers[question.id]) ===
+                  Number(question.answer);
+
+                const options = getOptions(question);
+
+                return (
+                  <div className="review-item" key={question.id}>
+                    <p className="review-question">
+                      {index + 1}. {question.question}
+                    </p>
+
+                    <p>
+                      Your answer:{" "}
+                      <span
+                        className={
+                          correct ? "correct-answer" : "wrong-answer"
+                        }
+                      >
+                        {options[answers[question.id]] ?? "Not answered"}
+                      </span>
+                    </p>
+
+                    <p>
+                      Correct answer:{" "}
+                      <span className="correct-answer">
+                        {options[question.answer] ?? "Not available"}
+                      </span>
+                    </p>
+
+                    {question.explanation && (
+                      <p className="review-explanation">
+                        Explanation: {question.explanation}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
       )}
 
       <footer className="footer">
         <span>© 2026 QuizMaster. All rights reserved.</span>
-        <span>Learn • Practice • Succeed</span>
+        <span>Learn More. Achieve More.</span>
       </footer>
     </div>
   );
