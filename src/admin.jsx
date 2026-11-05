@@ -1,7 +1,7 @@
-
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import "./admin.css";
+
 const ADMIN_EMAIL = "ebalemesa05@gmail.com";
 
 const emptyForm = {
@@ -31,7 +31,7 @@ export default function Admin() {
 
   useEffect(() => {
     checkSession();
-  }, [])}
+  }, []);
 
   async function checkSession() {
     try {
@@ -40,7 +40,10 @@ export default function Admin() {
       if (error) throw error;
 
       if (data.session) {
-        if (data.session.user.email?.toLowerCase() === ADMIN_EMAIL) {
+        if (
+          data.session.user.email?.toLowerCase() ===
+          ADMIN_EMAIL.toLowerCase()
+        ) {
           setSession(data.session);
           await loadData();
         } else {
@@ -61,14 +64,18 @@ export default function Admin() {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+      const { data, error } =
+        await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
 
       if (error) throw error;
 
-      if (data.user.email?.toLowerCase() !== ADMIN_EMAIL) {
+      if (
+        data.user.email?.toLowerCase() !==
+        ADMIN_EMAIL.toLowerCase()
+      ) {
         await supabase.auth.signOut();
         throw new Error("This admin email is not authorized.");
       }
@@ -169,7 +176,10 @@ export default function Admin() {
       return;
     }
 
-    if (form.options.length !== 4 || form.options.some((option) => !option.trim())) {
+    if (
+      form.options.length !== 4 ||
+      form.options.some((option) => !option.trim())
+    ) {
       setMessage("Please fill in all four options.");
       return;
     }
@@ -267,7 +277,11 @@ export default function Admin() {
   }
 
   async function deleteQuestion(id) {
-    if (!window.confirm("Are you sure you want to delete this question?")) {
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this question?"
+      )
+    ) {
       return;
     }
 
@@ -333,7 +347,11 @@ export default function Admin() {
   }
 
   async function deleteResult(id) {
-    if (!window.confirm("Are you sure you want to delete this student result?")) {
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this student result?"
+      )
+    ) {
       return;
     }
 
@@ -368,27 +386,31 @@ export default function Admin() {
     });
   }
 
+  // LOADING SCREEN
   if (loading) {
-     return (
-      <div className="app">
+    return (
+      <div className="admin-page">
         <div className="quiz-container">
           <div className="question-card">
             <h2>Loading Admin Dashboard...</h2>
           </div>
         </div>
       </div>
-      );
+    );
   }
 
+  // ADMIN LOGIN
   if (!session) {
     return (
-      <div className="app">
+      <div className="admin-page">
         <div className="quiz-container">
           <div className="question-card">
             <h1>Admin Login</h1>
             <p>Enter your admin email and password.</p>
 
             <form onSubmit={login}>
+              <label>Admin Email</label>
+
               <input
                 type="email"
                 placeholder="Admin email"
@@ -396,6 +418,8 @@ export default function Admin() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
+
+              <label>Password</label>
 
               <input
                 type="password"
@@ -425,6 +449,7 @@ export default function Admin() {
     );
   }
 
+  // ADMIN DASHBOARD
   return (
     <div className="admin-page">
       <div className="quiz-container">
@@ -587,14 +612,16 @@ export default function Admin() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(260px, 1fr))",
                 gap: "15px",
                 marginTop: "20px",
               }}
             >
               {results.map((result) => {
                 const score = Number(result.score) || 0;
-                const total = Number(result.total_questions) || 0;
+                const total =
+                  Number(result.total_questions) || 0;
                 const percentage = getPercentage(score, total);
 
                 return (
@@ -607,7 +634,9 @@ export default function Admin() {
                       border: "1px solid #38bdf8",
                     }}
                   >
-                    <h3>{result.student_name || "Unknown Student"}</h3>
+                    <h3>
+                      {result.student_name || "Unknown Student"}
+                    </h3>
 
                     <p>
                       <strong>Score:</strong> {score} / {total}
@@ -648,7 +677,9 @@ export default function Admin() {
                     <p>
                       <strong>Date:</strong>{" "}
                       {result.created_at
-                        ? new Date(result.created_at).toLocaleString()
+                        ? new Date(
+                            result.created_at
+                          ).toLocaleString()
                         : "Unknown"}
                     </p>
 
@@ -681,7 +712,8 @@ export default function Admin() {
 
             <p>
               <strong>Score:</strong>{" "}
-              {selectedResult.score} / {selectedResult.total_questions}
+              {selectedResult.score} /{" "}
+              {selectedResult.total_questions}
             </p>
 
             <p>
@@ -695,7 +727,9 @@ export default function Admin() {
             <p>
               <strong>Date:</strong>{" "}
               {selectedResult.created_at
-                ? new Date(selectedResult.created_at).toLocaleString()
+                ? new Date(
+                    selectedResult.created_at
+                  ).toLocaleString()
                 : "Unknown"}
             </p>
 
@@ -706,16 +740,22 @@ export default function Admin() {
 
               return questions.map((question, index) => {
                 const options = getOptions(question);
-                const selectedAnswer = studentAnswers[question.id];
+                const selectedAnswer =
+                  studentAnswers[question.id];
                 const correctAnswer = Number(question.answer);
 
-                const isAnswered = selectedAnswer !== undefined;
+                const isAnswered =
+                  selectedAnswer !== undefined;
+
                 const isCorrect =
                   isAnswered &&
                   Number(selectedAnswer) === correctAnswer;
 
                 return (
-                  <div key={question.id} className="review-item">
+                  <div
+                    key={question.id}
+                    className="review-item"
+                  >
                     <p>
                       <strong>
                         {index + 1}. {question.question}
@@ -725,7 +765,8 @@ export default function Admin() {
                     <p>
                       <strong>Student Answer:</strong>{" "}
                       {isAnswered
-                        ? options[Number(selectedAnswer)] ?? "Unknown"
+                        ? options[Number(selectedAnswer)] ??
+                          "Unknown"
                         : "Not answered"}
                     </p>
 
@@ -736,11 +777,11 @@ export default function Admin() {
 
                     <p>
                       {isCorrect ? (
-                        <strong style={{ color: "green" }}>
+                        <strong style={{ color: "#22c55e" }}>
                           Correct
                         </strong>
                       ) : (
-                        <strong style={{ color: "red" }}>
+                        <strong style={{ color: "#ef4444" }}>
                           Incorrect
                         </strong>
                       )}
@@ -758,7 +799,6 @@ export default function Admin() {
             </button>
           </div>
         )}
-
       </div>
     </div>
   );
