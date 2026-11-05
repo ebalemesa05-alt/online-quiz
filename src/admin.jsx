@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
-
+import "./admin.css";
 const ADMIN_EMAIL = "ebalemesa05@gmail.com";
 
 const emptyForm = {
@@ -31,7 +31,7 @@ export default function Admin() {
 
   useEffect(() => {
     checkSession();
-  }, []);
+  }, [])}
 
   async function checkSession() {
     try {
@@ -369,7 +369,7 @@ export default function Admin() {
   }
 
   if (loading) {
-    return (
+     return (
       <div className="app">
         <div className="quiz-container">
           <div className="question-card">
@@ -377,7 +377,7 @@ export default function Admin() {
           </div>
         </div>
       </div>
-    );
+      );
   }
 
   if (!session) {
@@ -426,7 +426,7 @@ export default function Admin() {
   }
 
   return (
-    <div className="app">
+    <div className="admin-page">
       <div className="quiz-container">
 
         {/* ADMIN HEADER */}
